@@ -6,6 +6,7 @@ import time
 from decimal import Decimal
 from typing import Any
 
+from .incident_adjustments import adjustment_for_tx
 from .pricing import report_amount
 from .storage import to_json
 
@@ -80,9 +81,16 @@ def run_lifetime_yield(conn) -> int:
     for row in rows:
         price = row["price_usd"]
         decimals = row["asset_decimals"]
-        gain_usd = _usd(row["gain_raw"], decimals, price)
-        loss_usd = _usd(row["loss_raw"], decimals, price)
-        net_usd = _usd(row["net_raw"], decimals, price)
+        raw_gain_usd = _usd(row["gain_raw"], decimals, price)
+        raw_loss_usd = _usd(row["loss_raw"], decimals, price)
+        raw_net_usd = _usd(row["net_raw"], decimals, price)
+        adjustment = adjustment_for_tx(row["tx_hash"])
+        adjusted_gain_raw = adjustment.adjusted_gain_raw if adjustment else row["gain_raw"]
+        adjusted_loss_raw = adjustment.adjusted_loss_raw if adjustment else row["loss_raw"]
+        adjusted_net_raw = adjustment.adjusted_net_raw if adjustment else row["net_raw"]
+        gain_usd = _usd(adjusted_gain_raw, decimals, price)
+        loss_usd = _usd(adjusted_loss_raw, decimals, price)
+        net_usd = _usd(adjusted_net_raw, decimals, price)
         priced = net_usd is not None
         report_row = {
             "chain_id": row["chain_id"],
@@ -99,11 +107,22 @@ def run_lifetime_yield(conn) -> int:
             "gain_raw": row["gain_raw"],
             "loss_raw": row["loss_raw"],
             "net_raw": row["net_raw"],
+            "adjusted_gain_raw": adjusted_gain_raw,
+            "adjusted_loss_raw": adjusted_loss_raw,
+            "adjusted_net_raw": adjusted_net_raw,
             "price_usd": price,
             "price_status": row["price_status"] or "missing",
+            "raw_gross_gain_usd": _decimal_or_none(raw_gain_usd),
+            "raw_loss_usd": _decimal_or_none(raw_loss_usd),
+            "raw_net_yield_usd": _decimal_or_none(raw_net_usd),
             "gross_gain_usd": _decimal_or_none(gain_usd),
             "loss_usd": _decimal_or_none(loss_usd),
             "net_yield_usd": _decimal_or_none(net_usd),
+            "is_adjusted": bool(adjustment),
+            "incident_id": adjustment.incident_id if adjustment else None,
+            "incident_classification": adjustment.classification if adjustment else None,
+            "incident_description": adjustment.description if adjustment else None,
+            "incident_disclosure_url": adjustment.disclosure_url if adjustment else None,
         }
         write_output(conn, run_id, "reports", report_row)
 
@@ -128,11 +147,20 @@ def run_lifetime_yield(conn) -> int:
                     "gross_gain_usd": Decimal(0),
                     "loss_usd": Decimal(0),
                     "net_yield_usd": Decimal(0),
+                    "raw_gross_gain_usd": Decimal(0),
+                    "raw_loss_usd": Decimal(0),
+                    "raw_net_yield_usd": Decimal(0),
+                    "adjusted_reports": 0,
                 },
             )
             bucket["reports"] += 1
+            if adjustment:
+                bucket["adjusted_reports"] += 1
             if priced:
                 bucket["priced_reports"] += 1
+                bucket["raw_gross_gain_usd"] += raw_gain_usd or Decimal(0)
+                bucket["raw_loss_usd"] += raw_loss_usd or Decimal(0)
+                bucket["raw_net_yield_usd"] += raw_net_usd or Decimal(0)
                 bucket["gross_gain_usd"] += gain_usd or Decimal(0)
                 bucket["loss_usd"] += loss_usd or Decimal(0)
                 bucket["net_yield_usd"] += net_usd or Decimal(0)
@@ -141,7 +169,14 @@ def run_lifetime_yield(conn) -> int:
 
     for (output_name, _), row in totals.items():
         serialized = dict(row)
-        for key in ("gross_gain_usd", "loss_usd", "net_yield_usd"):
+        for key in (
+            "gross_gain_usd",
+            "loss_usd",
+            "net_yield_usd",
+            "raw_gross_gain_usd",
+            "raw_loss_usd",
+            "raw_net_yield_usd",
+        ):
             serialized[key] = _decimal_or_none(serialized[key])
         write_output(conn, run_id, output_name, serialized)
     conn.commit()

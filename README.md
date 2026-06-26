@@ -29,6 +29,7 @@ By default the CLI loads RPC and API values from `.env` in this repo, then `/hom
 yearn-data --db data/yearn.sqlite discover --chains eth arb kat
 yearn-data index-events --to-block 25400000 --chunk-size 5000
 yearn-data run lifetime-yield
+yearn-data run vault-volume
 ```
 
 The SQLite database stores raw event rows, normalized strategy reports, prices, resumable cursors, and analysis outputs so later research jobs can reuse the same indexed data.
@@ -39,6 +40,12 @@ The `lifetime-yield` aggregate columns `gross_gain_usd`, `loss_usd`, and `net_yi
 
 Rows changed by an incident adjustment are marked in `reports.csv` with `is_adjusted`, `incident_id`, `incident_classification`, `incident_description`, and `incident_disclosure_url`. Raw indexed `strategy_reports` rows in SQLite are not modified.
 
+## Vault Volume Outputs
+
+The `vault-volume` job indexes user `Deposit`/`Withdraw` events and strategy debt movement. V2 strategy allocation volume is derived from `StrategyReported.debtAdded` and `debtPaid`; V3 allocation volume is indexed from `DebtUpdated` events.
+
+The headline volume metric is `gross_total_volume_usd`, defined as deposits + withdrawals + allocations + deallocations. Exports also include net user flow, net strategy flow, per-chain/vault/strategy/token/month rollups, and raw `vault_flows.csv` / `strategy_debt_flows.csv` event files.
+
 ## Pricing
 
 The `price` command supports three modes:
@@ -47,6 +54,7 @@ The `price` command supports three modes:
 yearn-data price --source defillama
 yearn-data price --source yprice
 yearn-data price --source defillama --fallback yprice
+yearn-data price-volume --source defillama --fallback yprice
 ```
 
 DefiLlama is the default primary source. `yprice` uses `ypricemagic` historical block pricing when that optional dependency is installed and is used as the default fallback for assets DefiLlama cannot price. All source/status rows are stored in SQLite.

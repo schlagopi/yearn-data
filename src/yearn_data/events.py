@@ -8,7 +8,7 @@ from eth_utils import event_abi_to_log_topic
 from web3 import Web3
 from web3._utils.events import get_event_data
 
-from .abis import V2_STRATEGY_REPORTED_EVENTS, V3_STRATEGY_REPORTED_EVENT
+from .abis import V2_STRATEGY_REPORTED_EVENTS, V3_DEBT_UPDATED_EVENTS, V3_STRATEGY_REPORTED_EVENT, VAULT_FLOW_EVENTS
 from .chains import web3_for
 
 
@@ -37,3 +37,25 @@ def strategy_report_event_abis(version: str) -> list[dict[str, Any]]:
 
 def strategy_report_topics(version: str) -> list[str]:
     return [event_topic(abi) for abi in strategy_report_event_abis(version)]
+
+
+def vault_flow_event_abis(version: str) -> list[dict[str, Any]]:
+    if version in VAULT_FLOW_EVENTS:
+        return VAULT_FLOW_EVENTS[version]
+    raise ValueError(f"unsupported vault version {version!r}")
+
+
+def vault_flow_topics(version: str) -> list[str]:
+    return [event_topic(abi) for abi in vault_flow_event_abis(version)]
+
+
+def debt_updated_event_abis(version: str) -> list[dict[str, Any]]:
+    if version == "v3":
+        return V3_DEBT_UPDATED_EVENTS
+    if version == "v2":
+        return []
+    raise ValueError(f"unsupported vault version {version!r}")
+
+
+def debt_updated_topics(version: str) -> list[str]:
+    return [event_topic(abi) for abi in debt_updated_event_abis(version)]

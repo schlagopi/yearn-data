@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from yearn_data.analysis import run_lifetime_yield
+from yearn_data.analysis import run_lifetime_yield, run_vault_volume
 from yearn_data.config import CHAINS
 from yearn_data.storage import connect, from_json, init_db, seed_chains
 
@@ -128,3 +128,76 @@ def test_lifetime_yield_excludes_known_incident_adjustments(tmp_path):
     outputs = [from_json(row["row_json"]) for row in report_rows]
     assert {row["incident_id"] for row in outputs} == {"yearn-2021-05-14-dai-curve-paper-loss"}
     assert all(row["is_adjusted"] for row in outputs)
+
+
+def test_vault_volume_sums_user_and_strategy_gross_flows(tmp_path):
+    conn = connect(tmp_path / "test.sqlite")
+    init_db(conn)
+    seed_chains(conn, CHAINS)
+    conn.execute(
+        """
+        INSERT INTO vaults (
+            chain_id, version, address, asset, asset_symbol, asset_decimals,
+            updated_at
+        )
+        VALUES (1, 'v3', '0x0000000000000000000000000000000000000001',
+                '0x0000000000000000000000000000000000000002', 'USDC', 6, 1)
+        """
+    )
+    conn.executemany(
+        """
+        INSERT INTO vault_flows (
+            chain_id, version, vault_address, direction, tx_hash, log_index,
+            block_number, block_timestamp, asset, asset_decimals, assets_raw,
+            shares_raw, decoded_json
+        )
+        VALUES (1, 'v3', '0x0000000000000000000000000000000000000001',
+                ?, ?, ?, 10, 100, '0x0000000000000000000000000000000000000002',
+                6, ?, ?, '{}')
+        """,
+        [
+            ("deposit", "0xaaa", 0, "1000000", "1000000"),
+            ("withdraw", "0xbbb", 1, "250000", "250000"),
+        ],
+    )
+    conn.executemany(
+        """
+        INSERT INTO strategy_debt_flows (
+            chain_id, version, vault_address, strategy_address, direction,
+            tx_hash, log_index, block_number, block_timestamp, asset,
+            asset_decimals, debt_delta_raw, current_debt_raw, new_debt_raw,
+            source_event, decoded_json
+        )
+        VALUES (1, 'v3', '0x0000000000000000000000000000000000000001',
+                '0x0000000000000000000000000000000000000003',
+                ?, ?, ?, 10, 100, '0x0000000000000000000000000000000000000002',
+                6, ?, NULL, NULL, 'DebtUpdated', '{}')
+        """,
+        [
+            ("allocation", "0xccc", 2, "500000"),
+            ("deallocation", "0xddd", 3, "125000"),
+        ],
+    )
+    conn.execute(
+        """
+        INSERT INTO prices (chain_id, token_address, timestamp, source, price_usd, status)
+        VALUES (1, '0x0000000000000000000000000000000000000002', 100, 'defillama', 2.0, 'ok')
+        """
+    )
+    conn.commit()
+
+    run_id = run_vault_volume(conn)
+    row = conn.execute(
+        "SELECT row_json FROM analysis_outputs WHERE run_id=? AND name='volume_summary'",
+        (run_id,),
+    ).fetchone()
+    output = from_json(row["row_json"])
+    assert Decimal(output["deposit_usd"]) == Decimal("2.00")
+    assert Decimal(output["withdraw_usd"]) == Decimal("0.500")
+    assert Decimal(output["net_user_flow_usd"]) == Decimal("1.500")
+    assert Decimal(output["allocation_usd"]) == Decimal("1.00")
+    assert Decimal(output["deallocation_usd"]) == Decimal("0.250")
+    assert Decimal(output["net_strategy_flow_usd"]) == Decimal("0.750")
+    assert Decimal(output["gross_user_volume_usd"]) == Decimal("2.500")
+    assert Decimal(output["gross_strategy_volume_usd"]) == Decimal("1.250")
+    assert Decimal(output["gross_total_volume_usd"]) == Decimal("3.750")

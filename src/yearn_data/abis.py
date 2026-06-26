@@ -166,3 +166,68 @@ STRATEGY_REPORTED_ABI = [
     V3_STRATEGY_REPORTED_EVENT,
     *V2_STRATEGY_REPORTED_EVENTS,
 ]
+
+V2_DEPOSIT_EVENT = {
+    "anonymous": False,
+    "type": "event",
+    "name": "Deposit",
+    "inputs": [
+        {"indexed": True, "type": "address", "name": "recipient"},
+        {"indexed": False, "type": "uint256", "name": "shares"},
+        {"indexed": False, "type": "uint256", "name": "amount"},
+    ],
+}
+
+V2_WITHDRAW_EVENT = {
+    "anonymous": False,
+    "type": "event",
+    "name": "Withdraw",
+    "inputs": [
+        {"indexed": True, "type": "address", "name": "recipient"},
+        {"indexed": False, "type": "uint256", "name": "shares"},
+        {"indexed": False, "type": "uint256", "name": "amount"},
+    ],
+}
+
+V3_DEPOSIT_EVENT = {
+    "anonymous": False,
+    "type": "event",
+    "name": "Deposit",
+    "inputs": [
+        {"indexed": True, "type": "address", "name": "sender"},
+        {"indexed": True, "type": "address", "name": "owner"},
+        {"indexed": False, "type": "uint256", "name": "assets"},
+        {"indexed": False, "type": "uint256", "name": "shares"},
+    ],
+}
+
+V3_WITHDRAW_EVENT = {
+    "anonymous": False,
+    "type": "event",
+    "name": "Withdraw",
+    "inputs": [
+        {"indexed": True, "type": "address", "name": "sender"},
+        {"indexed": True, "type": "address", "name": "receiver"},
+        {"indexed": True, "type": "address", "name": "owner"},
+        {"indexed": False, "type": "uint256", "name": "assets"},
+        {"indexed": False, "type": "uint256", "name": "shares"},
+    ],
+}
+
+V3_DEBT_UPDATED_EVENT = {
+    "anonymous": False,
+    "type": "event",
+    "name": "DebtUpdated",
+    "inputs": [
+        {"indexed": True, "type": "address", "name": "strategy"},
+        {"indexed": False, "type": "uint256", "name": "current_debt"},
+        {"indexed": False, "type": "uint256", "name": "new_debt"},
+    ],
+}
+
+VAULT_FLOW_EVENTS = {
+    "v2": [V2_DEPOSIT_EVENT, V2_WITHDRAW_EVENT],
+    "v3": [V3_DEPOSIT_EVENT, V3_WITHDRAW_EVENT],
+}
+
+V3_DEBT_UPDATED_EVENTS = [V3_DEBT_UPDATED_EVENT]

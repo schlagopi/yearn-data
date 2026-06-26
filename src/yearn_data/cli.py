@@ -5,12 +5,12 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from .analysis import run_lifetime_yield
+from .analysis import run_lifetime_yield, run_vault_volume
 from .config import CHAINS, load_environment, normalize_chain_key
 from .discovery import discover
 from .exports import export_analysis
-from .indexing import index_all_reports
-from .pricing import price_unpriced_reports
+from .indexing import index_all_reports, index_all_volume
+from .pricing import price_unpriced_reports, price_unpriced_volume
 from .storage import DEFAULT_DB_PATH, connect, init_db, seed_chains
 
 
@@ -22,6 +22,14 @@ def _chains(values: list[str] | None) -> list[str]:
     if not values:
         return list(CHAINS)
     return [normalize_chain_key(value) for value in values]
+
+
+def _run_analysis(conn, job: str) -> int:
+    if job == "lifetime-yield":
+        return run_lifetime_yield(conn)
+    if job == "vault-volume":
+        return run_vault_volume(conn)
+    raise ValueError(f"unsupported analysis job {job!r}")
 
 
 def open_db(path: str | Path):
@@ -52,20 +60,30 @@ def build_parser() -> argparse.ArgumentParser:
     index_p.add_argument("--to-block", type=int, help="Stop block for every selected chain")
     index_p.add_argument("--chunk-size", type=int, default=50_000)
 
+    volume_index_p = sub.add_parser("index-volume")
+    volume_index_p.add_argument("--chains", nargs="+", help="Chains to index")
+    volume_index_p.add_argument("--to-block", type=int, help="Stop block for every selected chain")
+    volume_index_p.add_argument("--chunk-size", type=int, default=50_000)
+
     price_p = sub.add_parser("price")
     price_p.add_argument("--limit", type=int, help="Maximum distinct token/timestamp prices to fetch")
     price_p.add_argument("--source", choices=["yprice", "defillama"], default="defillama")
     price_p.add_argument("--fallback", choices=["yprice", "defillama", "none"], default="yprice")
 
+    volume_price_p = sub.add_parser("price-volume")
+    volume_price_p.add_argument("--limit", type=int, help="Maximum distinct token/timestamp prices to fetch")
+    volume_price_p.add_argument("--source", choices=["yprice", "defillama"], default="defillama")
+    volume_price_p.add_argument("--fallback", choices=["yprice", "defillama", "none"], default="yprice")
+
     analyze_p = sub.add_parser("analyze")
-    analyze_p.add_argument("job", choices=["lifetime-yield"])
+    analyze_p.add_argument("job", choices=["lifetime-yield", "vault-volume"])
 
     export_p = sub.add_parser("export")
-    export_p.add_argument("job", choices=["lifetime-yield"])
+    export_p.add_argument("job", choices=["lifetime-yield", "vault-volume"])
     export_p.add_argument("--out", default="exports")
 
     run_p = sub.add_parser("run")
-    run_p.add_argument("job", choices=["lifetime-yield"])
+    run_p.add_argument("job", choices=["lifetime-yield", "vault-volume"])
     run_p.add_argument("--chains", nargs="+", help="Chains to discover/index")
     run_p.add_argument("--to-block", type=int)
     run_p.add_argument("--chunk-size", type=int, default=50_000)
@@ -102,14 +120,31 @@ def main(argv: list[str] | None = None) -> int:
         print(f"indexed {count} strategy report logs")
         return 0
 
+    if args.command == "index-volume":
+        count = index_all_volume(
+            conn,
+            _chains(args.chains),
+            to_block=args.to_block,
+            chunk_size=args.chunk_size,
+            progress=progress,
+        )
+        print(f"indexed {count} volume logs/rows")
+        return 0
+
     if args.command == "price":
         fallback = None if args.fallback == "none" else args.fallback
         count = price_unpriced_reports(conn, limit=args.limit, source=args.source, fallback=fallback)
         print(f"priced/recorded {count} token timestamp rows")
         return 0
 
+    if args.command == "price-volume":
+        fallback = None if args.fallback == "none" else args.fallback
+        count = price_unpriced_volume(conn, limit=args.limit, source=args.source, fallback=fallback)
+        print(f"priced/recorded {count} volume token timestamp rows")
+        return 0
+
     if args.command == "analyze":
-        run_id = run_lifetime_yield(conn)
+        run_id = _run_analysis(conn, args.job)
         print(f"analysis run {run_id} complete")
         return 0
 
@@ -123,17 +158,29 @@ def main(argv: list[str] | None = None) -> int:
         chains = _chains(args.chains)
         count = discover(conn, chains, find_deployment=args.find_deployment)
         print(f"discovered/upserted {count} vault rows")
-        count = index_all_reports(conn, chains, to_block=args.to_block, chunk_size=args.chunk_size, progress=progress)
-        print(f"indexed {count} strategy report logs")
+        if args.job == "lifetime-yield":
+            count = index_all_reports(conn, chains, to_block=args.to_block, chunk_size=args.chunk_size, progress=progress)
+            print(f"indexed {count} strategy report logs")
+        else:
+            count = index_all_volume(conn, chains, to_block=args.to_block, chunk_size=args.chunk_size, progress=progress)
+            print(f"indexed {count} volume logs/rows")
         fallback = None if args.price_fallback == "none" else args.price_fallback
-        count = price_unpriced_reports(
-            conn,
-            limit=args.price_limit,
-            source=args.price_source,
-            fallback=fallback,
-        )
+        if args.job == "lifetime-yield":
+            count = price_unpriced_reports(
+                conn,
+                limit=args.price_limit,
+                source=args.price_source,
+                fallback=fallback,
+            )
+        else:
+            count = price_unpriced_volume(
+                conn,
+                limit=args.price_limit,
+                source=args.price_source,
+                fallback=fallback,
+            )
         print(f"priced/recorded {count} token timestamp rows")
-        run_id = run_lifetime_yield(conn)
+        run_id = _run_analysis(conn, args.job)
         print(f"analysis run {run_id} complete")
         for path in export_analysis(conn, args.job, args.out):
             print(path)

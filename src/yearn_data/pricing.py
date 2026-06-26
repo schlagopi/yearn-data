@@ -216,6 +216,83 @@ def price_unpriced_reports(
     return count
 
 
+def price_unpriced_volume(
+    conn,
+    limit: int | None = None,
+    source: str = "defillama",
+    fallback: str | None = "yprice",
+) -> int:
+    if source not in SUPPORTED_SOURCES:
+        raise ValueError(f"unsupported price source {source!r}")
+    if fallback is not None and fallback not in SUPPORTED_SOURCES:
+        raise ValueError(f"unsupported fallback source {fallback!r}")
+    sql = """
+    SELECT chain_id, asset, block_timestamp, MIN(block_number) AS block_number
+    FROM (
+        SELECT chain_id, asset, block_timestamp, block_number FROM vault_flows WHERE asset IS NOT NULL
+        UNION ALL
+        SELECT chain_id, asset, block_timestamp, block_number FROM strategy_debt_flows WHERE asset IS NOT NULL
+    ) flows
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM prices p
+        WHERE p.chain_id = flows.chain_id
+          AND lower(p.token_address) = lower(flows.asset)
+          AND p.timestamp = flows.block_timestamp
+          AND p.source = ?
+    )
+    GROUP BY chain_id, asset, block_timestamp
+    ORDER BY block_timestamp
+    """
+    if limit:
+        sql += f" LIMIT {int(limit)}"
+    rows = conn.execute(sql, (source,)).fetchall()
+    count = 0
+    if source == "defillama":
+        count += _price_unpriced_reports_defillama_batched(conn, rows, fallback)
+        return count
+
+    for row in rows:
+        sources = [source]
+        if fallback and fallback != source:
+            sources.append(fallback)
+        for price_source in sources:
+            price, status, payload = _fetch_price(
+                price_source,
+                int(row["chain_id"]),
+                row["asset"],
+                int(row["block_timestamp"]),
+                int(row["block_number"]),
+            )
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO prices (
+                    chain_id, token_address, timestamp, block_number,
+                    source, price_usd, status, raw_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    int(row["chain_id"]),
+                    row["asset"],
+                    int(row["block_timestamp"]),
+                    int(row["block_number"]),
+                    price_source,
+                    price,
+                    status,
+                    to_json(payload),
+                ),
+            )
+            count += 1
+            if status == "ok":
+                break
+        if count % 100 == 0:
+            conn.commit()
+            time.sleep(0.2)
+    conn.commit()
+    return count
+
+
 def _chunks(rows, size: int):
     for i in range(0, len(rows), size):
         yield rows[i : i + size]

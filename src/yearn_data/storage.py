@@ -88,6 +88,58 @@ CREATE TABLE IF NOT EXISTS strategy_reports (
 CREATE INDEX IF NOT EXISTS strategy_reports_asset_idx
 ON strategy_reports (chain_id, asset, block_timestamp);
 
+CREATE TABLE IF NOT EXISTS vault_flows (
+    chain_id INTEGER NOT NULL,
+    version TEXT NOT NULL,
+    vault_address TEXT NOT NULL,
+    direction TEXT NOT NULL,
+    sender TEXT,
+    owner TEXT,
+    receiver TEXT,
+    tx_hash TEXT NOT NULL,
+    log_index INTEGER NOT NULL,
+    block_number INTEGER NOT NULL,
+    block_timestamp INTEGER NOT NULL,
+    asset TEXT,
+    asset_decimals INTEGER,
+    assets_raw TEXT NOT NULL,
+    shares_raw TEXT NOT NULL,
+    decoded_json TEXT NOT NULL DEFAULT '{}',
+    PRIMARY KEY (chain_id, tx_hash, log_index)
+);
+
+CREATE INDEX IF NOT EXISTS vault_flows_asset_idx
+ON vault_flows (chain_id, asset, block_timestamp);
+
+CREATE INDEX IF NOT EXISTS vault_flows_vault_idx
+ON vault_flows (chain_id, vault_address, block_number);
+
+CREATE TABLE IF NOT EXISTS strategy_debt_flows (
+    chain_id INTEGER NOT NULL,
+    version TEXT NOT NULL,
+    vault_address TEXT NOT NULL,
+    strategy_address TEXT NOT NULL,
+    direction TEXT NOT NULL,
+    tx_hash TEXT NOT NULL,
+    log_index INTEGER NOT NULL,
+    block_number INTEGER NOT NULL,
+    block_timestamp INTEGER NOT NULL,
+    asset TEXT,
+    asset_decimals INTEGER,
+    debt_delta_raw TEXT NOT NULL,
+    current_debt_raw TEXT,
+    new_debt_raw TEXT,
+    source_event TEXT NOT NULL,
+    decoded_json TEXT NOT NULL DEFAULT '{}',
+    PRIMARY KEY (chain_id, tx_hash, log_index, direction)
+);
+
+CREATE INDEX IF NOT EXISTS strategy_debt_flows_asset_idx
+ON strategy_debt_flows (chain_id, asset, block_timestamp);
+
+CREATE INDEX IF NOT EXISTS strategy_debt_flows_strategy_idx
+ON strategy_debt_flows (chain_id, strategy_address, block_number);
+
 CREATE TABLE IF NOT EXISTS prices (
     chain_id INTEGER NOT NULL,
     token_address TEXT NOT NULL,

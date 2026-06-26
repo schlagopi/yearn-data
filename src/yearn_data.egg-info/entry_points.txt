@@ -1,0 +1,2 @@
+[console_scripts]
+yearn-data = yearn_data.cli:main

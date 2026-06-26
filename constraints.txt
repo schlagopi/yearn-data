@@ -1,0 +1,4 @@
+# Keep pip out of legacy packages that fail on supported Python versions.
+web3>=7.0.0,<8.0.0
+toolz>=1.0.0
+typing-extensions>=4.12.2

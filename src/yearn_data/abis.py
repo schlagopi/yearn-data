@@ -1,0 +1,168 @@
+"""Minimal ABIs used by the indexer."""
+
+ERC20_ABI = [
+    {
+        "type": "function",
+        "name": "decimals",
+        "inputs": [],
+        "outputs": [{"type": "uint8", "name": ""}],
+        "stateMutability": "view",
+    },
+    {
+        "type": "function",
+        "name": "symbol",
+        "inputs": [],
+        "outputs": [{"type": "string", "name": ""}],
+        "stateMutability": "view",
+    },
+    {
+        "type": "function",
+        "name": "name",
+        "inputs": [],
+        "outputs": [{"type": "string", "name": ""}],
+        "stateMutability": "view",
+    },
+]
+
+ROLE_MANAGER_ABI = [
+    {
+        "type": "function",
+        "name": "getAllVaults",
+        "inputs": [],
+        "outputs": [{"type": "address[]", "name": ""}],
+        "stateMutability": "view",
+    }
+]
+
+V2_REGISTRY_ABI = [
+    {
+        "anonymous": False,
+        "type": "event",
+        "name": "NewVault",
+        "inputs": [
+            {"indexed": True, "type": "address", "name": "token"},
+            {"indexed": True, "type": "uint256", "name": "vault_id"},
+            {"indexed": False, "type": "address", "name": "vault"},
+            {"indexed": False, "type": "string", "name": "api_version"},
+        ],
+    },
+    {
+        "anonymous": False,
+        "type": "event",
+        "name": "NewVault",
+        "inputs": [
+            {"indexed": True, "type": "address", "name": "token"},
+            {"indexed": True, "type": "uint256", "name": "vaultId"},
+            {"indexed": False, "type": "uint256", "name": "vaultType"},
+            {"indexed": False, "type": "address", "name": "vault"},
+            {"indexed": False, "type": "string", "name": "apiVersion"},
+        ],
+    },
+    {
+        "type": "function",
+        "name": "numTokens",
+        "inputs": [],
+        "outputs": [{"type": "uint256", "name": ""}],
+        "stateMutability": "view",
+    },
+    {
+        "type": "function",
+        "name": "tokens",
+        "inputs": [{"type": "uint256", "name": ""}],
+        "outputs": [{"type": "address", "name": ""}],
+        "stateMutability": "view",
+    },
+    {
+        "type": "function",
+        "name": "numVaults",
+        "inputs": [{"type": "address", "name": ""}],
+        "outputs": [{"type": "uint256", "name": ""}],
+        "stateMutability": "view",
+    },
+    {
+        "type": "function",
+        "name": "vaults",
+        "inputs": [{"type": "address", "name": ""}, {"type": "uint256", "name": ""}],
+        "outputs": [{"type": "address", "name": ""}],
+        "stateMutability": "view",
+    },
+]
+
+VAULT_METADATA_ABI = [
+    {
+        "type": "function",
+        "name": "asset",
+        "inputs": [],
+        "outputs": [{"type": "address", "name": ""}],
+        "stateMutability": "view",
+    },
+    {
+        "type": "function",
+        "name": "token",
+        "inputs": [],
+        "outputs": [{"type": "address", "name": ""}],
+        "stateMutability": "view",
+    },
+    {
+        "type": "function",
+        "name": "apiVersion",
+        "inputs": [],
+        "outputs": [{"type": "string", "name": ""}],
+        "stateMutability": "view",
+    },
+    *ERC20_ABI,
+]
+
+V3_STRATEGY_REPORTED_EVENT = {
+    "anonymous": False,
+    "type": "event",
+    "name": "StrategyReported",
+    "inputs": [
+        {"indexed": True, "type": "address", "name": "strategy"},
+        {"indexed": False, "type": "uint256", "name": "gain"},
+        {"indexed": False, "type": "uint256", "name": "loss"},
+        {"indexed": False, "type": "uint256", "name": "current_debt"},
+        {"indexed": False, "type": "uint256", "name": "protocol_fees"},
+        {"indexed": False, "type": "uint256", "name": "total_fees"},
+        {"indexed": False, "type": "uint256", "name": "total_refunds"},
+    ],
+}
+
+V2_STRATEGY_REPORTED_EVENTS = [
+    {
+        "anonymous": False,
+        "type": "event",
+        "name": "StrategyReported",
+        "inputs": [
+            {"indexed": True, "type": "address", "name": "strategy"},
+            {"indexed": False, "type": "uint256", "name": "gain"},
+            {"indexed": False, "type": "uint256", "name": "loss"},
+            {"indexed": False, "type": "uint256", "name": "debtPaid"},
+            {"indexed": False, "type": "uint256", "name": "totalGain"},
+            {"indexed": False, "type": "uint256", "name": "totalLoss"},
+            {"indexed": False, "type": "uint256", "name": "totalDebt"},
+            {"indexed": False, "type": "uint256", "name": "debtAdded"},
+            {"indexed": False, "type": "uint256", "name": "debtRatio"},
+        ],
+    },
+    {
+        "anonymous": False,
+        "type": "event",
+        "name": "StrategyReported",
+        "inputs": [
+            {"indexed": True, "type": "address", "name": "strategy"},
+            {"indexed": False, "type": "uint256", "name": "gain"},
+            {"indexed": False, "type": "uint256", "name": "loss"},
+            {"indexed": False, "type": "uint256", "name": "totalGain"},
+            {"indexed": False, "type": "uint256", "name": "totalLoss"},
+            {"indexed": False, "type": "uint256", "name": "totalDebt"},
+            {"indexed": False, "type": "uint256", "name": "debtAdded"},
+            {"indexed": False, "type": "uint256", "name": "debtRatio"},
+        ],
+    },
+]
+
+STRATEGY_REPORTED_ABI = [
+    V3_STRATEGY_REPORTED_EVENT,
+    *V2_STRATEGY_REPORTED_EVENTS,
+]

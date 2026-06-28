@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
 from typing import Any
 
@@ -53,6 +54,57 @@ def cached_block_timestamp(conn, chain: str, block_number: int) -> int:
         (cfg.chain_id, int(block_number), ts),
     )
     return ts
+
+
+def cached_block_timestamps_many(conn, chain: str, block_numbers: list[int], max_workers: int = 32) -> dict[int, int]:
+    unique = sorted({int(block_number) for block_number in block_numbers})
+    if not unique:
+        return {}
+    cfg = chain_config(chain)
+    found: dict[int, int] = {}
+    for i in range(0, len(unique), 900):
+        chunk = unique[i : i + 900]
+        placeholders = ",".join("?" for _ in chunk)
+        rows = conn.execute(
+            f"""
+            SELECT block_number, timestamp
+            FROM block_timestamps
+            WHERE chain_id=? AND block_number IN ({placeholders})
+            """,
+            [cfg.chain_id, *chunk],
+        ).fetchall()
+        for row in rows:
+            found[int(row["block_number"])] = int(row["timestamp"])
+
+    missing = [block_number for block_number in unique if block_number not in found]
+    if not missing:
+        return found
+
+    fetched: dict[int, int] = {}
+    workers = max(1, min(int(max_workers), len(missing)))
+    executor = ThreadPoolExecutor(max_workers=workers)
+    futures = {executor.submit(block_timestamp, chain, block_number): block_number for block_number in missing}
+    try:
+        for future in as_completed(futures):
+            block_number = futures[future]
+            fetched[block_number] = int(future.result())
+    except BaseException:
+        for future in futures:
+            future.cancel()
+        executor.shutdown(wait=False, cancel_futures=True)
+        raise
+    else:
+        executor.shutdown(wait=True)
+
+    conn.executemany(
+        """
+        INSERT OR REPLACE INTO block_timestamps (chain_id, block_number, timestamp)
+        VALUES (?, ?, ?)
+        """,
+        [(cfg.chain_id, block_number, timestamp) for block_number, timestamp in fetched.items()],
+    )
+    found.update(fetched)
+    return found
 
 
 def find_contract_creation_block(chain: str, address: str, low: int = 0, high: int | None = None) -> int:

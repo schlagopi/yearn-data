@@ -21,29 +21,47 @@ def latest_run_id(conn, name: str) -> int:
 
 def export_analysis(conn, name: str, out_dir: str | Path = "exports", run_id: int | None = None) -> list[Path]:
     rid = run_id or latest_run_id(conn, name)
-    rows = conn.execute(
-        "SELECT name, row_json FROM analysis_outputs WHERE run_id=? ORDER BY name",
-        (rid,),
-    ).fetchall()
-    grouped: dict[str, list[dict[str, Any]]] = {}
-    for row in rows:
-        grouped.setdefault(row["name"], []).append(from_json(row["row_json"]))
-
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
-    for output_name, output_rows in grouped.items():
-        if not output_rows:
+
+    output_names = [
+        row["name"]
+        for row in conn.execute(
+            "SELECT DISTINCT name FROM analysis_outputs WHERE run_id=? ORDER BY name",
+            (rid,),
+        )
+    ]
+    for output_name in output_names:
+        first = conn.execute(
+            """
+            SELECT rowid, row_json
+            FROM analysis_outputs
+            WHERE run_id=? AND name=?
+            ORDER BY rowid
+            LIMIT 1
+            """,
+            (rid, output_name),
+        ).fetchone()
+        if not first:
             continue
+        first_item = from_json(first["row_json"])
         path = out / f"{output_name}.csv"
-        columns: list[str] = []
-        for item in output_rows:
-            for key in item:
-                if key not in columns:
-                    columns.append(key)
+        columns: list[str] = list(first_item)
         with path.open("w", newline="") as fp:
-            writer = csv.DictWriter(fp, fieldnames=columns)
+            writer = csv.DictWriter(fp, fieldnames=columns, extrasaction="ignore")
             writer.writeheader()
-            writer.writerows(output_rows)
+            writer.writerow(first_item)
+            rows = conn.execute(
+                """
+                SELECT row_json
+                FROM analysis_outputs
+                WHERE run_id=? AND name=? AND rowid > ?
+                ORDER BY rowid
+                """,
+                (rid, output_name, int(first["rowid"])),
+            )
+            for row in rows:
+                writer.writerow(from_json(row["row_json"]))
         written.append(path)
     return written

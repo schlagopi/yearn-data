@@ -113,6 +113,30 @@ VAULT_METADATA_ABI = [
     *ERC20_ABI,
 ]
 
+VAULT_SHARE_PRICE_ABI = [
+    {
+        "type": "function",
+        "name": "pricePerShare",
+        "inputs": [],
+        "outputs": [{"type": "uint256", "name": ""}],
+        "stateMutability": "view",
+    },
+    {
+        "type": "function",
+        "name": "getPricePerFullShare",
+        "inputs": [],
+        "outputs": [{"type": "uint256", "name": ""}],
+        "stateMutability": "view",
+    },
+    {
+        "type": "function",
+        "name": "decimals",
+        "inputs": [],
+        "outputs": [{"type": "uint8", "name": ""}],
+        "stateMutability": "view",
+    },
+]
+
 V3_STRATEGY_REPORTED_EVENT = {
     "anonymous": False,
     "type": "event",
@@ -211,6 +235,17 @@ V3_WITHDRAW_EVENT = {
         {"indexed": True, "type": "address", "name": "owner"},
         {"indexed": False, "type": "uint256", "name": "assets"},
         {"indexed": False, "type": "uint256", "name": "shares"},
+    ],
+}
+
+ERC20_TRANSFER_EVENT = {
+    "anonymous": False,
+    "type": "event",
+    "name": "Transfer",
+    "inputs": [
+        {"indexed": True, "type": "address", "name": "from"},
+        {"indexed": True, "type": "address", "name": "to"},
+        {"indexed": False, "type": "uint256", "name": "value"},
     ],
 }
 

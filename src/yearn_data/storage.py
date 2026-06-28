@@ -114,6 +114,17 @@ ON vault_flows (chain_id, asset, block_timestamp);
 CREATE INDEX IF NOT EXISTS vault_flows_vault_idx
 ON vault_flows (chain_id, vault_address, block_number);
 
+CREATE TABLE IF NOT EXISTS vault_share_prices (
+    chain_id INTEGER NOT NULL,
+    vault_address TEXT NOT NULL,
+    block_number INTEGER NOT NULL,
+    price_per_share_raw TEXT NOT NULL,
+    share_decimals INTEGER NOT NULL,
+    source TEXT NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (chain_id, vault_address, block_number)
+);
+
 CREATE TABLE IF NOT EXISTS strategy_debt_flows (
     chain_id INTEGER NOT NULL,
     version TEXT NOT NULL,

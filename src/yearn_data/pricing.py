@@ -7,6 +7,8 @@ from decimal import Decimal
 from typing import Any
 import os
 import json
+from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 
@@ -226,27 +228,7 @@ def price_unpriced_volume(
         raise ValueError(f"unsupported price source {source!r}")
     if fallback is not None and fallback not in SUPPORTED_SOURCES:
         raise ValueError(f"unsupported fallback source {fallback!r}")
-    sql = """
-    SELECT chain_id, asset, block_timestamp, MIN(block_number) AS block_number
-    FROM (
-        SELECT chain_id, asset, block_timestamp, block_number FROM vault_flows WHERE asset IS NOT NULL
-        UNION ALL
-        SELECT chain_id, asset, block_timestamp, block_number FROM strategy_debt_flows WHERE asset IS NOT NULL
-    ) flows
-    WHERE NOT EXISTS (
-        SELECT 1
-        FROM prices p
-        WHERE p.chain_id = flows.chain_id
-          AND lower(p.token_address) = lower(flows.asset)
-          AND p.timestamp = flows.block_timestamp
-          AND p.source = ?
-    )
-    GROUP BY chain_id, asset, block_timestamp
-    ORDER BY block_timestamp
-    """
-    if limit:
-        sql += f" LIMIT {int(limit)}"
-    rows = conn.execute(sql, (source,)).fetchall()
+    rows = _unpriced_volume_rows(conn, source, limit)
     count = 0
     if source == "defillama":
         count += _price_unpriced_reports_defillama_batched(conn, rows, fallback)
@@ -293,6 +275,45 @@ def price_unpriced_volume(
     return count
 
 
+def _unpriced_volume_rows(conn, source: str, limit: int | None = None) -> list[dict[str, int | str]]:
+    rows_by_key: dict[tuple[int, str, int], dict[str, int | str]] = {}
+    for table in ("vault_flows", "strategy_debt_flows"):
+        table_rows = conn.execute(
+            f"""
+            SELECT
+                f.chain_id,
+                f.asset,
+                f.block_timestamp,
+                MIN(f.block_number) AS block_number
+            FROM {table} f
+            LEFT JOIN prices p
+              ON p.chain_id = f.chain_id
+             AND p.token_address = f.asset
+             AND p.timestamp = f.block_timestamp
+             AND p.source = ?
+            WHERE f.asset IS NOT NULL
+              AND p.token_address IS NULL
+            GROUP BY f.chain_id, f.asset, f.block_timestamp
+            ORDER BY f.block_timestamp
+            """,
+            (source,),
+        ).fetchall()
+        for row in table_rows:
+            key = (int(row["chain_id"]), row["asset"], int(row["block_timestamp"]))
+            existing = rows_by_key.get(key)
+            if existing is None or int(row["block_number"]) < int(existing["block_number"]):
+                rows_by_key[key] = {
+                    "chain_id": int(row["chain_id"]),
+                    "asset": row["asset"],
+                    "block_timestamp": int(row["block_timestamp"]),
+                    "block_number": int(row["block_number"]),
+                }
+    rows = sorted(rows_by_key.values(), key=lambda row: int(row["block_timestamp"]))
+    if limit:
+        return rows[: int(limit)]
+    return rows
+
+
 def _chunks(rows, size: int):
     for i in range(0, len(rows), size):
         yield rows[i : i + size]
@@ -312,82 +333,103 @@ def _price_unpriced_reports_defillama_batched(conn, rows, fallback: str | None) 
             """
         ).fetchall()
     }
-    for batch in _chunks(rows, 100):
-        requests_ = [
-            (int(row["chain_id"]), row["asset"], int(row["block_timestamp"]))
-            for row in batch
-        ]
-        try:
-            results = fetch_defillama_prices_batch(requests_)
-        except Exception:
-            results = {}
-            for chain_id, token_address, timestamp in requests_:
-                price, status, payload = fetch_defillama_price(chain_id, token_address, timestamp)
-                results[(chain_id, token_address, timestamp)] = (price, status, payload)
-        for row in batch:
-            chain_id = int(row["chain_id"])
-            token_address = row["asset"]
-            timestamp = int(row["block_timestamp"])
-            block_number = int(row["block_number"])
-            price, status, payload = results.get(
-                (chain_id, token_address, timestamp),
-                (None, "missing", {"timestamp": timestamp}),
-            )
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO prices (
-                    chain_id, token_address, timestamp, block_number,
-                    source, price_usd, status, raw_json
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    chain_id,
-                    token_address,
-                    timestamp,
-                    block_number,
-                    "defillama",
-                    price,
-                    status,
-                    to_json(payload),
-                ),
-            )
-            count += 1
-            if status != "ok" and fallback and fallback != "defillama":
-                fallback_key = (chain_id, token_address.lower())
-                if fallback_key in blocked_fallback_tokens:
-                    fallback_price, fallback_status, fallback_payload = (
-                        None,
-                        "skipped",
-                        {"reason": "prior yprice failures for token"},
-                    )
-                else:
-                    fallback_price, fallback_status, fallback_payload = fetch_yprice_price(chain_id, token_address, block_number)
-                    if fallback_status != "ok":
-                        blocked_fallback_tokens.add(fallback_key)
-                conn.execute(
-                    """
-                    INSERT OR REPLACE INTO prices (
-                        chain_id, token_address, timestamp, block_number,
-                        source, price_usd, status, raw_json
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        chain_id,
-                        token_address,
-                        timestamp,
-                        block_number,
-                        fallback,
-                        fallback_price,
-                        fallback_status,
-                        to_json(fallback_payload),
-                    ),
-                )
-                count += 1
+    batches = list(_defillama_coin_batches(rows))
+    workers = max(1, int(os.environ.get("YEARN_DATA_PRICE_WORKERS", "8")))
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = [executor.submit(_fetch_defillama_batch, batch) for batch in batches]
+        for future in as_completed(futures):
+            batch, results = future.result()
+            for row in batch:
+                count += _write_defillama_price_row(conn, row, results, fallback, blocked_fallback_tokens)
             if count % 500 == 0:
                 conn.commit()
-        conn.commit()
-        time.sleep(0.05)
+            conn.commit()
     conn.commit()
     return count
+
+
+def _fetch_defillama_batch(batch):
+    requests_ = [
+        (int(row["chain_id"]), row["asset"], int(row["block_timestamp"]))
+        for row in batch
+    ]
+    try:
+        return batch, fetch_defillama_prices_batch(requests_)
+    except Exception:
+        results = {}
+        for chain_id, token_address, timestamp in requests_:
+            price, status, payload = fetch_defillama_price(chain_id, token_address, timestamp)
+            results[(chain_id, token_address, timestamp)] = (price, status, payload)
+        return batch, results
+
+
+def _write_defillama_price_row(conn, row, results, fallback: str | None, blocked_fallback_tokens: set[tuple[int, str]]) -> int:
+    chain_id = int(row["chain_id"])
+    token_address = row["asset"]
+    timestamp = int(row["block_timestamp"])
+    block_number = int(row["block_number"])
+    price, status, payload = results.get(
+        (chain_id, token_address, timestamp),
+        (None, "missing", {"timestamp": timestamp}),
+    )
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO prices (
+            chain_id, token_address, timestamp, block_number,
+            source, price_usd, status, raw_json
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            chain_id,
+            token_address,
+            timestamp,
+            block_number,
+            "defillama",
+            price,
+            status,
+            to_json(payload),
+        ),
+    )
+    if status != "ok" and fallback and fallback != "defillama":
+        fallback_key = (chain_id, token_address.lower())
+        if fallback_key in blocked_fallback_tokens:
+            fallback_price, fallback_status, fallback_payload = (
+                None,
+                "skipped",
+                {"reason": "prior yprice failures for token"},
+            )
+        else:
+            fallback_price, fallback_status, fallback_payload = fetch_yprice_price(chain_id, token_address, block_number)
+            if fallback_status != "ok":
+                blocked_fallback_tokens.add(fallback_key)
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO prices (
+                chain_id, token_address, timestamp, block_number,
+                source, price_usd, status, raw_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                chain_id,
+                token_address,
+                timestamp,
+                block_number,
+                fallback,
+                fallback_price,
+                fallback_status,
+                to_json(fallback_payload),
+            ),
+        )
+        return 2
+    return 1
+
+
+def _defillama_coin_batches(rows, max_timestamps: int = 400):
+    rows_by_coin: dict[tuple[int, str], list] = defaultdict(list)
+    for row in rows:
+        rows_by_coin[(int(row["chain_id"]), row["asset"])].append(row)
+    for coin_rows in rows_by_coin.values():
+        coin_rows.sort(key=lambda row: int(row["block_timestamp"]))
+        yield from _chunks(coin_rows, max_timestamps)

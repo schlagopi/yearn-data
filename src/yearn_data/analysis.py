@@ -191,16 +191,8 @@ def _selected_price_join(table_alias: str) -> str:
           ON p.chain_id = {table_alias}.chain_id
          AND p.token_address = {table_alias}.asset
          AND p.timestamp = {table_alias}.block_timestamp
-         AND p.source = (
-            SELECT p2.source
-            FROM prices p2
-            WHERE p2.chain_id = {table_alias}.chain_id
-              AND p2.token_address = {table_alias}.asset
-              AND p2.timestamp = {table_alias}.block_timestamp
-              AND p2.status = 'ok'
-            ORDER BY CASE p2.source WHEN 'defillama' THEN 0 WHEN 'yprice' THEN 1 ELSE 2 END
-            LIMIT 1
-         )
+         AND p.source = 'defillama'
+         AND p.status = 'ok'
     """
 
 

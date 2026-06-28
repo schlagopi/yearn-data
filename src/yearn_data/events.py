@@ -8,7 +8,13 @@ from eth_utils import event_abi_to_log_topic
 from web3 import Web3
 from web3._utils.events import get_event_data
 
-from .abis import V2_STRATEGY_REPORTED_EVENTS, V3_DEBT_UPDATED_EVENTS, V3_STRATEGY_REPORTED_EVENT, VAULT_FLOW_EVENTS
+from .abis import (
+    ERC20_TRANSFER_EVENT,
+    V2_STRATEGY_REPORTED_EVENTS,
+    V3_DEBT_UPDATED_EVENTS,
+    V3_STRATEGY_REPORTED_EVENT,
+    VAULT_FLOW_EVENTS,
+)
 from .chains import web3_for
 
 
@@ -47,6 +53,14 @@ def vault_flow_event_abis(version: str) -> list[dict[str, Any]]:
 
 def vault_flow_topics(version: str) -> list[str]:
     return [event_topic(abi) for abi in vault_flow_event_abis(version)]
+
+
+def erc20_transfer_event_abi() -> dict[str, Any]:
+    return ERC20_TRANSFER_EVENT
+
+
+def erc20_transfer_topic() -> str:
+    return event_topic(ERC20_TRANSFER_EVENT)
 
 
 def debt_updated_event_abis(version: str) -> list[dict[str, Any]]:

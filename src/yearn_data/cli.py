@@ -81,6 +81,12 @@ def build_parser() -> argparse.ArgumentParser:
     export_p = sub.add_parser("export")
     export_p.add_argument("job", choices=["lifetime-yield", "vault-volume"])
     export_p.add_argument("--out", default="exports")
+    export_p.add_argument(
+        "--no-rotate",
+        dest="rotate",
+        action="store_false",
+        help="Overwrite in place without keeping the previous snapshot.",
+    )
 
     run_p = sub.add_parser("run")
     run_p.add_argument("job", choices=["lifetime-yield", "vault-volume"])
@@ -92,6 +98,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument("--price-fallback", choices=["yprice", "defillama", "none"], default="yprice")
     run_p.add_argument("--find-deployment", action="store_true")
     run_p.add_argument("--out", default="exports")
+    run_p.add_argument("--no-rotate", dest="rotate", action="store_false")
     return parser
 
 
@@ -149,7 +156,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "export":
-        paths = export_analysis(conn, args.job, args.out)
+        paths = export_analysis(conn, args.job, args.out, rotate=args.rotate)
         for path in paths:
             print(path)
         return 0
@@ -182,7 +189,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"priced/recorded {count} token timestamp rows")
         run_id = _run_analysis(conn, args.job)
         print(f"analysis run {run_id} complete")
-        for path in export_analysis(conn, args.job, args.out):
+        for path in export_analysis(conn, args.job, args.out, rotate=args.rotate):
             print(path)
         return 0
 

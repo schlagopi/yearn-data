@@ -24,6 +24,16 @@ def _complete_run(conn, name: str, output_name: str) -> int:
     return run_id
 
 
+def _output(conn, run_id: int, output_name: str, row_json: str) -> None:
+    conn.execute(
+        """
+        INSERT INTO analysis_outputs (run_id, name, row_json)
+        VALUES (?, ?, ?)
+        """,
+        (run_id, output_name, row_json),
+    )
+
+
 def _index_state(conn, chain_id: int, target: str, event_name: str, last_block: int) -> None:
     conn.execute(
         """
@@ -61,3 +71,36 @@ def test_vault_volume_meta_uses_slowest_relevant_event_stream(tmp_path):
 
     meta = json.loads((tmp_path / "exports" / "volume_summary_meta.json").read_text())
     assert meta["last_blocks"] == {"1": 150}
+
+
+def test_export_rotation_keeps_previous_aggregate_and_skips_detail_outputs(tmp_path):
+    conn = connect(tmp_path / "test.sqlite")
+    init_db(conn)
+    run_id = _complete_run(conn, "lifetime-yield", "total_yield_summary")
+    _output(
+        conn,
+        run_id,
+        "reports",
+        '{"chain_id":1,"tx_hash":"0xnew","net_yield_usd":"2"}',
+    )
+    _index_state(conn, 1, "vault-a", "StrategyReported", 100)
+    conn.commit()
+
+    out = tmp_path / "exports"
+    out.mkdir()
+    (out / "total_yield_summary.csv").write_text("dimension,key\nold,old\n")
+    (out / "total_yield_summary_meta.json").write_text('{"run_id":0}')
+    (out / "reports.csv").write_text("chain_id,tx_hash,net_yield_usd\n1,0xold,1\n")
+    (out / "reports_meta.json").write_text('{"run_id":0}')
+
+    export_analysis(conn, "lifetime-yield", out, run_id=run_id)
+
+    assert (out / "total_yield_summary_previous.csv").read_text() == "dimension,key\nold,old\n"
+    assert json.loads((out / "total_yield_summary_previous_meta.json").read_text()) == {"run_id": 0}
+    assert "all,all" in (out / "total_yield_summary.csv").read_text()
+    assert json.loads((out / "total_yield_summary_meta.json").read_text())["run_id"] == run_id
+
+    assert not (out / "reports_previous.csv").exists()
+    assert not (out / "reports_previous_meta.json").exists()
+    assert "0xnew" in (out / "reports.csv").read_text()
+    assert json.loads((out / "reports_meta.json").read_text())["run_id"] == run_id
